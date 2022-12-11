@@ -1,0 +1,64 @@
+:PROPERTIES:
+:ID:       ea78ad3f-f0be-4c7c-a193-0fd07080c775
+:END:
+#+title: Rust Runtime Startup in no_std
+
+std の ~lang_start()~ のようなものを ~no_std~ も使用できるか確認してみている。
+
+#+begin_src rust
+  #[lang = "start"]
+  fn _main<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> ! 
+#+end_src
+
+上記のコード片を実際に ~riscv64gc-unknown-none-elf~ の元で build してみた。
+実験で用いたコードは下記:
+
+#+begin_src rust
+  #![no_std]
+  #![feature(lang_items)]
+  pub mod stat;
+  pub mod usys;
+  use core::panic;
+  use usys::exit;
+
+  // wrapper so that it's ok if main() does not call exit().
+  #[lang = "start"]
+  fn _main<T>(main: fn() -> T, argc: isize, argv: *const *const u8) -> ! {
+      let xstatus = 0;
+      main();
+      exit(xstatus)
+  }
+
+  #[panic_handler]
+  fn panic(_info: &panic::PanicInfo<'_>) -> ! {
+      loop {}
+  }
+#+end_src
+
+#+begin_src rust 
+  #![no_std]
+
+  use ulib::usys::{exec, exit};
+
+  static INIT: &str = "/init";
+  static ARGV: [&str; 2] = ["init", "0"];
+
+  fn main() {
+      exec(INIT, &ARGV);
+      loop {
+        exit(0)
+      }
+  }
+#+end_src
+
+ビルドして逆アセンブルしてみると下記:
+
+[[file:main.png]]
+
+~exec~ から渡されてくる本来の引数 ~a0~, ~a1~ は ~a1~, ~a2~ にずらされて、 第一引数には ~initcode~ の ~main()~ がセットされている。
+~_main~ の実態は以下になっていて、ちゃんと ~initcode~ の ~main~ を呼んでいる。
+
+[[file:rust_main.png]]
+
+
+そうすると、 ~*const *const u8~ が ~usize~ であることを考えれば、自分の Runtime Startup では少し悪さをすることもできる。
