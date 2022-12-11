@@ -1,0 +1,44 @@
+:PROPERTIES:
+:ID:       9b1f4c4a-b4a4-494f-8410-13ad36216e5e
+:ROAM_REFS: https://github.com/rust-lang/rust/blob/master/library/std/src/rt.rs
+:END:
+#+title: Rust RunTime startup
+
+[[https://github.com/rust-lang/rust/blob/master/library/std/src/rt.rs][Rust Runtime Startup]] の ~lang_start~ が始まり。
+
+#+begin_src rust
+        #[lang = "start"]
+        fn lang_start<T: crate::process::Termination + 'static>(
+            main: fn() -> T,
+            argc: isize,
+            argv: *const *const u8,
+            sigpipe: u8,
+        ) -> isize {
+            let Ok(v) = lang_start_internal(
+                &move
+                    || crate::sys_common::backtrace::__rust_begin_short_backtrace(main)
+                    .report()
+                    .to_i32(),
+                argc,
+                argv,
+                sigpipe,
+            );
+            v
+        }
+#+end_src
+
+~main~ は ~fn() -> T~ 関数ポインタになっていて、T のトレイト境界に ~Termination + 'static~ が指定されている。
+Return Code にとっては、[[id:4a3c6902-3581-4a18-b321-3b0420e66c8c][ ~Termination~ Trait]] が重要なのかもしれない。
+
+内部では、 ~lang_start_internal~ が呼ばれていて、この中で、 ~rt::init(argc: isize, argv: *const *const u8, ...)~ と ~rt::cleanup~ が呼ばれる。  
+~init~ が Runtime の真の初期化で ~cleanup~ が返ってきたときのお掃除ぽい。 ~init~ にて引数の設定をしているはずで、 ~init~ の主な処理は[[id:e9d697b7-0989-4481-91ac-33a3f5ee67b1][ ~sys::init~ ]]を呼ぶこと。
+
+-----
+
+~lang_start~ の引数に ~main()~ の関数ポインタを設定しているのは謎だったが、どうやら rustc で行なれているらしい[fn:1]。
+例えば、OS を自作しているような場合に、このような rt の関数を自分で考えると、実際に呼び出す ~main~ 関数を ~extern "Rust" {}~ のブロックで宣言してしまう手法が考えられるが、それだとジェネリックな型をシグネチャに持ってくることはできない。
+よって、この仕組みを再利用できたらいいなと思う。
+
+* Footnotes
+
+[fn:1] [[id:900e1a53-fb93-4a79-866d-ccc1a6462b12][Who calls ~lang_start()~ ]]
