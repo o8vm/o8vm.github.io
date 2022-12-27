@@ -1,0 +1,42 @@
+:PROPERTIES:
+:ID:       b9e8839c-a178-4fcb-a62b-6b3f07fe2121
+:END:
+#+title: FileDesc
+
+[[https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/fd.rs][unix::fs.rs]] にある:
+
+#+begin_src rust
+  #[derive(Debug)]
+  pub struct FileDesc(OwnedFd);
+#+end_src
+
+#+begin_src rust
+  impl FileDesc {
+      pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+          let ret = cvt(unsafe {
+              libc::read(
+                  self.as_raw_fd(),
+                  buf.as_mut_ptr() as *mut libc::c_void,
+                  cmp::min(buf.len(), READ_LIMIT),
+              )
+          })?;
+          Ok(ret as usize)
+      }
+  ...
+      pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
+          let ret = cvt(unsafe {
+              libc::write(
+                  self.as_raw_fd(),
+                  buf.as_ptr() as *const libc::c_void,
+                  cmp::min(buf.len(), READ_LIMIT),
+              )
+          })?;
+          Ok(ret as usize)
+      }
+#+end_src
+
+~OwnedFd~ とかは、[[https://github.com/rust-lang/rust/tree/master/library/std/src/os/fd][os::fd]] 配下を見ればわかるが、恐らく C から借りてるデータ構造にライフタイムなどを持たせるもの？
+
+自作 OS などでは、prtintf のためにまず ~putc()~ を定義しがちだけど、kernel に ~write()~ があれば buf を持てるので Rust で OS を作る場合そもそも ~putc()~ はいらない。
+
+ここで大事なのは、むしろ、[[id:4aa913dc-04ef-4b94-9024-32cde21cfde9][Rustでのシステムコールの考え方]]だと思う。シスコールの戻値は ~io::Result~ と ~cvt()~ による変換が関係しているみたい。

@@ -1,0 +1,75 @@
+:PROPERTIES:
+:ID:       61e201cb-541b-456e-baf8-e1cfc80ca531
+:END:
+#+title: Stdout & Stderr
+
+引続き[[https://github.com/rust-lang/rust/blob/master/library/std/src/io/stdio.rs][stdio.rs]]の中で、 ~Stdout~ の実態は以下(~Stderr~ も似たようなものなのでここでは省略する):
+
+#+begin_src rust
+  pub struct Stdout {
+      // FIXME: this should be LineWriter or BufWriter depending on the state of
+      //        stdout (tty or not). Note that if this is not line buffered it
+      //        should also flush-on-panic or some form of flush-on-abort.
+      inner: &'static ReentrantMutex<RefCell<LineWriter<StdoutRaw>>>,
+  }
+  pub struct StdoutLock<'a> {
+      inner: ReentrantMutexGuard<'a, RefCell<LineWriter<StdoutRaw>>>,
+  }
+  static STDOUT: OnceLock<ReentrantMutex<RefCell<LineWriter<StdoutRaw>>>> = OnceLock::new();
+#+end_src
+
+実態を ~static~ で持っているので、 ~OnceLock~ による初期化と ~Mutex~ によるアクセスになっている。
+なんで ~RefCell~ も使用しているかというと、 [[https://github.com/rust-lang/rust/blob/master/library/std/src/sys_common/remutex.rs][ ~ReentrantMutex~ ]] では、データは ~UnsafeCell~ にはつつまれていないから、自分で可変なデータ構造に包んでおく必要があるためぽい[fn:1] 。
+
+~LineWriter~ は ~BufWriter~ のラッパなのでここでは触れない。
+重要なのは ~StdoutRaw~ から先。
+
+#+begin_src rust
+  use crate::sys::stdio;
+  struct StdoutRaw(stdio::Stdout);
+  const fn stdout_raw() -> StdoutRaw {
+      StdoutRaw(stdio::Stdout::new())
+  }
+#+end_src
+
+なので実態は ~sys~ 以下を見ればよくて unix の場合は [[https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/stdio.rs][sys::unix::stdio.rs]]
+
+#+begin_src rust
+  pub struct Stdin(());
+  pub struct Stdout(());
+  pub struct Stderr(());
+  ...
+  impl Stdout {
+      pub const fn new() -> Stdout {
+          Stdout(())
+      }
+  }
+
+  impl io::Write for Stdout {
+      fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+          unsafe { ManuallyDrop::new(FileDesc::from_raw_fd(libc::STDOUT_FILENO)).write(buf) }
+      }
+
+      fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+          unsafe {
+              ManuallyDrop::new(FileDesc::from_raw_fd(libc::STDOUT_FILENO)).write_vectored(bufs)
+          }
+      }
+
+      #[inline]
+      fn is_write_vectored(&self) -> bool {
+          true
+      }
+
+      fn flush(&mut self) -> io::Result<()> {
+          Ok(())
+      }
+  }
+#+end_src
+
+fd は libc よりもってきてて、[[id:b9e8839c-a178-4fcb-a62b-6b3f07fe2121][ ~FileDesc~ に ~write()~ が実装されている]]
+
+-----
+
+[fn:1] Rust の ~Mutex~ は ~futex~ を使って実装さている: https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/locks/futex_mutex.rs
+

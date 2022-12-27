@@ -1,0 +1,64 @@
+:PROPERTIES:
+:ID:       4508dd6c-cb05-4a78-ac6f-07c9ce16e096
+:END:
+#+title: _print() in std::io
+
+~_print()~ は[[https://github.com/rust-lang/rust/blob/master/library/std/src/io/stdio.rs][io::stdio.rs]]にあって ~stdout~, ~stderr~ と結びついている。
+
+#+begin_src rust
+  pub fn _print(args: fmt::Arguments<'_>) {
+      print_to(args, stdout, "stdout");
+  }
+...
+  pub fn _eprint(args: fmt::Arguments<'_>) {
+      print_to(args, stderr, "stderr");
+  }
+#+end_src
+
+~print_to~ は以下。 ~stdout()~, ~stderr()~ 関数で ~fd~ ー ~Stdout~, ~Stderr~ ー を抽出しているぽい。  
+キャプチャバッファが利用可能だった場合には、 ~print_to_buffer_if_capture_used()~ [fn:1]で書き込みを行い、
+そうでない場合に、 ~Stderr~, ~Stdout~ への書き込みになるようだ。
+
+ちなみに ~stdout~, ~stderr~ を抽出している箇所、つまり、 ~global_s:~ に指定されている関数ポインタの戻り値にて ~Write~ トレイトが境界に指定されている。
+このトレイト境界のおかげで、 ~write_fmt~ が利用できていると見えるが、ということは ~Stderr~, ~Stdout~ が ~Write~ トレイトを実装しているということになる。
+
+#+begin_src rust
+  fn print_to<T>(args: fmt::Arguments<'_>, global_s: fn() -> T, label: &str)
+  where
+      T: Write,
+  {
+      if print_to_buffer_if_capture_used(args) {
+          // Successfully wrote to capture buffer.
+          return;
+      }
+
+      if let Err(e) = global_s().write_fmt(args) {
+          panic!("failed printing to {label}: {e}");
+      }
+  }
+#+end_src
+
+#+begin_src rust
+  pub fn stdout() -> Stdout {
+      Stdout {
+          inner: STDOUT
+              .get_or_init(|| ReentrantMutex::new(RefCell::new(LineWriter::new(stdout_raw())))),
+      }
+  }
+  pub fn stderr() -> Stderr {
+      // Note that unlike `stdout()` we don't use `at_exit` here to register a
+      // destructor. Stderr is not buffered, so there's no need to run a
+      // destructor for flushing the buffer
+      static INSTANCE: ReentrantMutex<RefCell<StderrRaw>> =
+          ReentrantMutex::new(RefCell::new(stderr_raw()));
+
+      Stderr { inner: &INSTANCE }
+  }
+#+end_src
+
+見ればわかるが、[[id:61e201cb-541b-456e-baf8-e1cfc80ca531][Stdout & Stderr]] の実態は ~Mutex~ に包まれた静的変数である。
+
+-----
+
+[fn:1] [[id:796d018d-9bdc-43f1-98a0-c1a9c4b14a85][ ~print_to_buffer_if_capture_used~ ]] について
+

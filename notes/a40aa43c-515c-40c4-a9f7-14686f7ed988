@@ -1,0 +1,24 @@
+:PROPERTIES:
+:ID:       a40aa43c-515c-40c4-a9f7-14686f7ed988
+:END:
+#+title: println!()
+
+Rust の ~println!()~ は[[https://doc.rust-lang.org/src/std/macros.rs.html#78-82][macros.html]]に定義されている。
+以下の通り、実態は[[id:4508dd6c-cb05-4a78-ac6f-07c9ce16e096][ ~_print()~ in std::io]] にある。
+
+#+begin_src rust
+  macro_rules! print {
+      ($($arg:tt)*) => {{
+          $crate::io::_print($crate::format_args!($($arg)*));
+      }};
+  }
+  macro_rules! println {
+      () => {
+          $crate::print!("\n")
+      };
+      ($($arg:tt)*) => {{
+          $crate::io::_print($crate::format_args_nl!($($arg)*));
+      }};
+  }
+#+end_src
+
