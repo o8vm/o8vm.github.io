@@ -1,0 +1,192 @@
+:PROPERTIES:
+:ID:       c9719f16-e036-41b1-a2e2-aa3686cd1e33
+:END:
+#+title: io::Result & io::Error
+
+[[https://github.com/rust-lang/rust/blob/master/library/std/src/io/error.rs][io/errors.rs]]に定義されている。構造をわかりやすい要素だけ以下に抜粋する。
+
+#+begin_src rust
+  pub type Result<T> = result::Result<T, Error>;
+  pub struct Error {
+      repr: Repr,
+  }
+  enum ErrorData<C> {
+      Os(i32),
+      Simple(ErrorKind),
+      SimpleMessage(&'static SimpleMessage),
+      Custom(C),
+  }
+  impl ErrorKind {
+      pub(crate) fn as_str(&self) -> &'static str {
+          use ErrorKind::*;
+          // tidy-alphabetical-start
+          match *self {
+              AddrInUse => "address in use",
+              AddrNotAvailable => "address not available",
+              AlreadyExists => "entity already exists",
+              ArgumentListTooLong => "argument list too long",
+              BrokenPipe => "broken pipe",
+              ConnectionAborted => "connection aborted",
+              ConnectionRefused => "connection refused",
+              ConnectionReset => "connection reset",
+              CrossesDevices => "cross-device link or rename",
+              Deadlock => "deadlock",
+              DirectoryNotEmpty => "directory not empty",
+              ExecutableFileBusy => "executable file busy",
+              FileTooLarge => "file too large",
+              FilesystemLoop => "filesystem loop or indirection limit (e.g. symlink loop)",
+              FilesystemQuotaExceeded => "filesystem quota exceeded",
+              HostUnreachable => "host unreachable",
+              Interrupted => "operation interrupted",
+              InvalidData => "invalid data",
+              InvalidFilename => "invalid filename",
+              InvalidInput => "invalid input parameter",
+              IsADirectory => "is a directory",
+              NetworkDown => "network down",
+              NetworkUnreachable => "network unreachable",
+              NotADirectory => "not a directory",
+              NotConnected => "not connected",
+              NotFound => "entity not found",
+              NotSeekable => "seek on unseekable file",
+              Other => "other error",
+              OutOfMemory => "out of memory",
+              PermissionDenied => "permission denied",
+              ReadOnlyFilesystem => "read-only filesystem or storage medium",
+              ResourceBusy => "resource busy",
+              StaleNetworkFileHandle => "stale network file handle",
+              StorageFull => "no storage space",
+              TimedOut => "timed out",
+              TooManyLinks => "too many links",
+              Uncategorized => "uncategorized error",
+              UnexpectedEof => "unexpected end of file",
+              Unsupported => "unsupported",
+              WouldBlock => "operation would block",
+              WriteZero => "write zero",
+          }
+          // tidy-alphabetical-end
+      }
+  }
+  impl Error {
+      pub fn last_os_error() -> Error {
+          Error::from_raw_os_error(sys::os::errno() as i32)
+      }
+      pub fn from_raw_os_error(code: i32) -> Error {
+          Error { repr: Repr::new_os(code) }
+      }
+      pub fn kind(&self) -> ErrorKind {
+          match self.repr.data() {
+              ErrorData::Os(code) => sys::decode_error_kind(code),
+              ErrorData::Custom(c) => c.kind,
+              ErrorData::Simple(kind) => kind,
+              ErrorData::SimpleMessage(m) => m.kind,
+          }
+      }
+  }
+#+end_src
+
+~Repr~ の表現は基本的には以下:
+
+#+begin_src rust
+  #[repr(transparent)]
+  pub(super) struct Repr(NonNull<()>, PhantomData<ErrorData<Box<Custom>>>);
+  impl Repr {
+      pub(super) fn new_os(code: i32) -> Self {
+          let utagged = ((code as usize) << 32) | TAG_OS;
+          // Safety: `TAG_OS` is not zero, so the result of the `|` is not 0.
+          let res = Self(unsafe { NonNull::new_unchecked(ptr::invalid_mut(utagged)) }, PhantomData);
+          // quickly smoke-check we encoded the right thing (This generally will
+          // only run in libstd's tests, unless the user uses -Zbuild-std)
+          debug_assert!(
+              matches!(res.data(), ErrorData::Os(c) if c == code),
+              "repr(os) encoding failed for {code}"
+          );
+          res
+      }
+  }
+#+end_src
+
+また、[[https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/mod.rs][ ~cvt()~ ]] の表現が以下なので、基本的に libc (syscall) のエラーは生の i32 をラップするだけで保持していて、 ~kind()~ で適宜 ~ErrorKind~ を抽出していることがわかる。
+
+#+begin_src rust
+  impl_is_minus_one! { i8 i16 i32 i64 isize }
+
+  pub fn cvt<T: IsMinusOne>(t: T) -> crate::io::Result<T> {
+      if t.is_minus_one() { Err(crate::io::Error::last_os_error()) } else { Ok(t) }
+  }
+
+  pub fn cvt_r<T, F>(mut f: F) -> crate::io::Result<T>
+  where
+      T: IsMinusOne,
+      F: FnMut() -> T,
+  {
+      loop {
+          match cvt(f()) {
+              Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+              other => return other,
+          }
+      }
+  }
+#+end_src
+
+ちなみに、肝となる ~decode_error_kind~ も同じところに以下のように定義されている。
+
+#+begin_src rust
+  pub fn decode_error_kind(errno: i32) -> ErrorKind {
+      use ErrorKind::*;
+      match errno as libc::c_int {
+          libc::E2BIG => ArgumentListTooLong,
+          libc::EADDRINUSE => AddrInUse,
+          libc::EADDRNOTAVAIL => AddrNotAvailable,
+          libc::EBUSY => ResourceBusy,
+          libc::ECONNABORTED => ConnectionAborted,
+          libc::ECONNREFUSED => ConnectionRefused,
+          libc::ECONNRESET => ConnectionReset,
+          libc::EDEADLK => Deadlock,
+          libc::EDQUOT => FilesystemQuotaExceeded,
+          libc::EEXIST => AlreadyExists,
+          libc::EFBIG => FileTooLarge,
+          libc::EHOSTUNREACH => HostUnreachable,
+          libc::EINTR => Interrupted,
+          libc::EINVAL => InvalidInput,
+          libc::EISDIR => IsADirectory,
+          libc::ELOOP => FilesystemLoop,
+          libc::ENOENT => NotFound,
+          libc::ENOMEM => OutOfMemory,
+          libc::ENOSPC => StorageFull,
+          libc::ENOSYS => Unsupported,
+          libc::EMLINK => TooManyLinks,
+          libc::ENAMETOOLONG => InvalidFilename,
+          libc::ENETDOWN => NetworkDown,
+          libc::ENETUNREACH => NetworkUnreachable,
+          libc::ENOTCONN => NotConnected,
+          libc::ENOTDIR => NotADirectory,
+          libc::ENOTEMPTY => DirectoryNotEmpty,
+          libc::EPIPE => BrokenPipe,
+          libc::EROFS => ReadOnlyFilesystem,
+          libc::ESPIPE => NotSeekable,
+          libc::ESTALE => StaleNetworkFileHandle,
+          libc::ETIMEDOUT => TimedOut,
+          libc::ETXTBSY => ExecutableFileBusy,
+          libc::EXDEV => CrossesDevices,
+
+          libc::EACCES | libc::EPERM => PermissionDenied,
+
+          // These two constants can have the same value on some systems,
+          // but different values on others, so we can't use a match
+          // clause
+          x if x == libc::EAGAIN || x == libc::EWOULDBLOCK => WouldBlock,
+
+          _ => Uncategorized,
+      }
+  }
+#+end_src
+
+~errno_location~ は[[https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/os.rs][unix/os.rs]]に定義されているが、実態は Linux の関数で説明は [[http://refspecs.linux-foundation.org/LSB_4.0.0/LSB-Core-generic/LSB-Core-generic/baselib---errno-location.html][ここ]]にある:
+
+#+begin_src rust
+  /// Returns the platform-specific value of errno
+  #[cfg(not(any(target_os = "dragonfly", target_os = "vxworks")))]
+  pub fn errno() -> i32 {
+      unsafe { (*errno_location()) as i32 }
+  }
+#+end_src
