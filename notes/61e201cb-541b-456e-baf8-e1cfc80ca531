@@ -71,5 +71,5 @@ fd は libc よりもってきてて、[[id:b9e8839c-a178-4fcb-a62b-6b3f07fe2121
 
 -----
 
-[fn:1] Rust の ~Mutex~ は ~futex~ を使って実装さている: https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/locks/futex_mutex.rs
+[fn:1] [[id:27f6a30f-4fc0-4698-aa6c-00ff70599b20][Rust の ~Mutex~ は ~futex~ を使って実装さている]]
 
