@@ -1,0 +1,38 @@
+:PROPERTIES:
+:ID:       3ed38be3-e794-4632-b120-0b478df85765
+:END:
+#+title: Futex in Linux
+
+実態は[[https://github.com/torvalds/linux/blob/master/kernel/futex/syscalls.c#L85][ ~do_futex()~ ]]になる。
+
+#+begin_src c
+  long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
+      u32 __user *uaddr2, u32 val2, u32 val3)
+  {
+    int cmd = op & FUTEX_CMD_MASK;
+    unsigned int flags = 0;
+
+    if (!(op & FUTEX_PRIVATE_FLAG))
+      flags |= FLAGS_SHARED;
+
+    if (op & FUTEX_CLOCK_REALTIME) {
+      flags |= FLAGS_CLOCKRT;
+      if (cmd != FUTEX_WAIT_BITSET && cmd != FUTEX_WAIT_REQUEUE_PI &&
+          cmd != FUTEX_LOCK_PI2)
+        return -ENOSYS;
+    }
+
+    switch (cmd) {
+    case FUTEX_WAIT:
+      val3 = FUTEX_BITSET_MATCH_ANY;
+      fallthrough;
+    case FUTEX_WAIT_BITSET:
+      return futex_wait(uaddr, flags, val, timeout, val3);
+    case FUTEX_WAKE:
+      val3 = FUTEX_BITSET_MATCH_ANY;
+      fallthrough;
+    case FUTEX_WAKE_BITSET:
+      return futex_wake(uaddr, flags, val, val3);
+#+end_src
+
+~wait()~ と ~wake()~ の実態は[[https://github.com/torvalds/linux/blob/master/kernel/futex/waitwake.c][waitwake.c]]にある。
