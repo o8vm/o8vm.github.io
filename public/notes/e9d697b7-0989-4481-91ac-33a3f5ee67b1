@@ -1,9 +1,0 @@
-:PROPERTIES:
-:ID:       e9d697b7-0989-4481-91ac-33a3f5ee67b1
-:END:
-#+title: sys::init
-
-Unix 環境での ~sys::init~ はたぶん[[https://github.com/rust-lang/rust/blob/master/library/std/src/sys/unix/mod.rs][これ]]で引数の初期化は中で呼ぶ ~args::init~ 。
-他は大したことしていなさそう。
-
-~args::init~ の主な処理は[[id:758444d0-2636-4c54-b2b9-0250f93b333a][これ]]
